@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from accounts.models import DriverProfile
 from operations.models import DriverBalanceTransaction, Notification, PushDevice
 
 
@@ -7,6 +8,27 @@ class DriverBalanceTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DriverBalanceTransaction
         fields = '__all__'
+
+
+class DriverTopUpSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0.01)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+class AdminDriverBalanceAdjustSerializer(serializers.Serializer):
+    driver_id = serializers.UUIDField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+    def validate_driver_id(self, value):
+        if not DriverProfile.objects.filter(pk=value).exists():
+            raise serializers.ValidationError('Driver profile does not exist.')
+        return value
+
+    def validate_amount(self, value):
+        if value == 0:
+            raise serializers.ValidationError('Amount cannot be zero.')
+        return value
 
 
 class NotificationSerializer(serializers.ModelSerializer):

@@ -1,22 +1,57 @@
+from decimal import Decimal
+
+from django.db import transaction
 from rest_framework import generics, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import User
+from accounts.models import DriverProfile, User
 from operations.fcm import send_push_to_user_ids
 from operations.google_maps import GoogleDistanceMatrixError, get_distance_matrix_km, resolve_delivery_zone
 from operations.models import DriverBalanceTransaction, Notification, PushDevice
 from operations.serializers import (
+	AdminDriverBalanceAdjustSerializer,
 	DistanceEstimateRequestSerializer,
 	DistanceEstimateResponseSerializer,
 	DriverBalanceTransactionSerializer,
+	DriverTopUpSerializer,
 	NotificationSerializer,
 	PushDeviceRegisterSerializer,
 	PushDeviceSerializer,
 	PushDeviceUnregisterSerializer,
 	PushSendSerializer,
 )
-from pharmacies_backend.permissions import IsAdmin
+from pharmacies_backend.permissions import IsAdmin, IsDriver
+
+
+def _apply_balance_change(
+	*,
+	driver: DriverProfile,
+	amount: Decimal,
+	transaction_type: str,
+	initiated_by_user,
+	order=None,
+	note: str = '',
+):
+	balance_before = driver.current_balance
+	balance_after = balance_before + amount
+	if balance_after < Decimal('0.00'):
+		raise ValidationError({'detail': 'Insufficient driver balance for this operation.'})
+
+	driver.current_balance = balance_after
+	driver.save(update_fields=['current_balance', 'updated_at'])
+	transaction = DriverBalanceTransaction.objects.create(
+		driver=driver,
+		order=order,
+		transaction_type=transaction_type,
+		amount=amount,
+		balance_before=balance_before,
+		balance_after=balance_after,
+		initiated_by_user=initiated_by_user,
+		note=note,
+	)
+	return transaction
 
 
 class DriverBalanceTransactionListView(generics.ListAPIView):
@@ -29,6 +64,48 @@ class DriverBalanceTransactionListView(generics.ListAPIView):
 		if user.role == 'driver':
 			return DriverBalanceTransaction.objects.filter(driver__user=user).order_by('-created_at')
 		return DriverBalanceTransaction.objects.none()
+
+
+class DriverTopUpView(APIView):
+	permission_classes = [IsDriver]
+
+	@transaction.atomic
+	def post(self, request):
+		serializer = DriverTopUpSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		payload = serializer.validated_data
+
+		driver = DriverProfile.objects.select_for_update().get(user=request.user)
+		transaction_row = _apply_balance_change(
+			driver=driver,
+			amount=payload['amount'],
+			transaction_type=DriverBalanceTransaction.TransactionType.TOP_UP,
+			initiated_by_user=request.user,
+			note=payload.get('note', '').strip() or 'Driver top-up via mobile app',
+		)
+
+		return Response(DriverBalanceTransactionSerializer(transaction_row).data, status=status.HTTP_201_CREATED)
+
+
+class AdminDriverBalanceAdjustView(APIView):
+	permission_classes = [IsAdmin]
+
+	@transaction.atomic
+	def post(self, request):
+		serializer = AdminDriverBalanceAdjustSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		payload = serializer.validated_data
+
+		driver = DriverProfile.objects.select_for_update().get(pk=payload['driver_id'])
+		transaction_row = _apply_balance_change(
+			driver=driver,
+			amount=payload['amount'],
+			transaction_type=DriverBalanceTransaction.TransactionType.MANUAL_ADJUSTMENT,
+			initiated_by_user=request.user,
+			note=payload.get('note', '').strip() or 'Admin manual balance adjustment',
+		)
+
+		return Response(DriverBalanceTransactionSerializer(transaction_row).data, status=status.HTTP_201_CREATED)
 
 
 class NotificationListView(generics.ListAPIView):

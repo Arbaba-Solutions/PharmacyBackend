@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import generics, status
@@ -8,6 +10,7 @@ from rest_framework.views import APIView
 from accounts.models import DriverProfile, User
 from catalog.models import DeliveryZone
 from operations.fcm import send_push_to_user_ids
+from operations.models import DriverBalanceTransaction
 from orders.models import BlacklistLog, Dispute, Order, Prescription
 from orders.pricing import calculate_order_pricing
 from orders.serializers import (
@@ -341,10 +344,38 @@ class DriverMarkPurchasedView(APIView):
 class DriverMarkDeliveredView(APIView):
 	permission_classes = [IsDriver]
 
+	@transaction.atomic
 	def post(self, request, pk):
-		order = Order.objects.select_related('driver', 'customer').get(pk=pk)
+		order = Order.objects.select_for_update().select_related('driver', 'customer').get(pk=pk)
 		if not order.driver or order.driver.user_id != request.user.id:
 			raise PermissionDenied('You can only update your own assigned order.')
+		if order.status not in {Order.Status.DRUG_PURCHASED, Order.Status.IN_DELIVERY}:
+			return Response({'detail': 'Order is not ready to be marked delivered.'}, status=status.HTTP_409_CONFLICT)
+
+		driver = DriverProfile.objects.select_for_update().get(pk=order.driver_id)
+		platform_fee = Decimal(str(order.platform_fee or 0))
+		if platform_fee > Decimal('0.00'):
+			if driver.current_balance < platform_fee:
+				return Response(
+					{'detail': 'Insufficient balance to settle platform fee. Please top up and retry delivery confirmation.'},
+					status=status.HTTP_409_CONFLICT,
+				)
+
+			balance_before = driver.current_balance
+			balance_after = balance_before - platform_fee
+			driver.current_balance = balance_after
+			driver.save(update_fields=['current_balance', 'updated_at'])
+
+			DriverBalanceTransaction.objects.create(
+				driver=driver,
+				order=order,
+				transaction_type=DriverBalanceTransaction.TransactionType.DELIVERY_FEE_DEDUCTION,
+				amount=-platform_fee,
+				balance_before=balance_before,
+				balance_after=balance_after,
+				initiated_by_user=request.user,
+				note='Platform fee deduction on successful delivery',
+			)
 
 		order.status = Order.Status.DELIVERED
 		order.delivered_at = timezone.now()

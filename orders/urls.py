@@ -6,6 +6,7 @@ from orders.views import (
     DriverAcceptOrderView,
     DriverMarkDeliveredView,
     DriverMarkPurchasedView,
+    DriverReportCustomerUnreachableView,
     OrderDetailView,
     OrderListCreateView,
     OrderPricingPreviewView,
@@ -26,4 +27,5 @@ urlpatterns = [
     path('<uuid:pk>/driver/accept/', DriverAcceptOrderView.as_view(), name='driver-accept-order'),
     path('<uuid:pk>/driver/purchased/', DriverMarkPurchasedView.as_view(), name='driver-mark-purchased'),
     path('<uuid:pk>/driver/delivered/', DriverMarkDeliveredView.as_view(), name='driver-mark-delivered'),
+    path('<uuid:pk>/driver/unreachable/', DriverReportCustomerUnreachableView.as_view(), name='driver-report-unreachable'),
 ]

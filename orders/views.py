@@ -47,6 +47,8 @@ class OrderListCreateView(generics.ListCreateAPIView):
 				customer_profile = user.customer_profile
 			except Exception as exc:  # noqa: BLE001
 				raise ValidationError('Customer profile is required before placing orders.') from exc
+			if user.is_blacklisted or customer_profile.flag_count >= 3:
+				raise ValidationError('Your account is blacklisted from placing new orders. Please contact support.')
 			order = serializer.save(customer=customer_profile)
 		else:
 			order = serializer.save()
@@ -357,3 +359,101 @@ class DriverMarkDeliveredView(APIView):
 		)
 
 		return Response(OrderSerializer(order).data)
+
+
+class DriverReportCustomerUnreachableView(APIView):
+	permission_classes = [IsDriver]
+
+	@transaction.atomic
+	def post(self, request, pk):
+		reason = (request.data.get('reason') or 'Customer unreachable after drug purchase.').strip()
+		order = (
+			Order.objects.select_for_update()
+			.select_related('driver', 'customer__user')
+			.get(pk=pk)
+		)
+		if not order.driver or order.driver.user_id != request.user.id:
+			raise PermissionDenied('You can only report issues on your assigned orders.')
+		if order.status not in {Order.Status.DRUG_PURCHASED, Order.Status.IN_DELIVERY}:
+			return Response(
+				{'detail': 'Order can only be reported unreachable after drug purchase.'},
+				status=status.HTTP_409_CONFLICT,
+			)
+
+		order.status = Order.Status.DISPUTED
+		order.save(update_fields=['status', 'updated_at'])
+
+		customer = order.customer
+		customer.flag_count += 1
+		auto_blacklisted = customer.flag_count >= 3
+		if auto_blacklisted:
+			customer.blacklisted_at = timezone.now()
+			customer.blacklisted_by = request.user
+			customer.user.is_blacklisted = True
+			customer.user.save(update_fields=['is_blacklisted', 'updated_at'])
+		customer.save(update_fields=['flag_count', 'blacklisted_at', 'blacklisted_by', 'updated_at'])
+
+		BlacklistLog.objects.create(
+			customer=customer,
+			order=order,
+			reason=reason,
+			incident_count_after=customer.flag_count,
+			auto_blacklisted=auto_blacklisted,
+		)
+
+		Dispute.objects.create(
+			order=order,
+			customer=customer,
+			driver=order.driver,
+			dispute_type='customer_unreachable_after_purchase',
+			description=reason,
+			created_by_user=request.user,
+		)
+
+		admin_user_ids = [
+			str(pk) for pk in User.objects.filter(role='admin', is_active=True).values_list('id', flat=True)
+		]
+		if admin_user_ids:
+			send_push_to_user_ids(
+				user_ids=admin_user_ids,
+				title='Customer flagged for unreachable cancellation',
+				body=(
+					'Customer reached 3 incidents and was auto-blacklisted.'
+					if auto_blacklisted
+					else 'A customer was flagged after unreachable cancellation.'
+				),
+				data={
+					'event': 'customer_flagged',
+					'order_id': str(order.id),
+					'customer_id': str(customer.id),
+					'flag_count': str(customer.flag_count),
+					'auto_blacklisted': 'true' if auto_blacklisted else 'false',
+				},
+				order=order,
+			)
+
+		send_push_to_user_ids(
+			user_ids=[str(customer.user_id)],
+			title='Order marked disputed',
+			body=(
+				'Your account has been auto-blacklisted after repeated incidents.'
+				if auto_blacklisted
+				else 'Your order was marked disputed due to unreachable delivery.'
+			),
+			data={
+				'event': 'customer_dispute_flag',
+				'order_id': str(order.id),
+				'flag_count': str(customer.flag_count),
+				'auto_blacklisted': 'true' if auto_blacklisted else 'false',
+			},
+			order=order,
+		)
+
+		return Response(
+			{
+				'order_id': str(order.id),
+				'status': order.status,
+				'customer_flag_count': customer.flag_count,
+				'auto_blacklisted': auto_blacklisted,
+			}
+		)

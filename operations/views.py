@@ -2,13 +2,19 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
+from operations.fcm import send_push_to_user_ids
 from operations.google_maps import GoogleDistanceMatrixError, get_distance_matrix_km, resolve_delivery_zone
-from operations.models import DriverBalanceTransaction, Notification
+from operations.models import DriverBalanceTransaction, Notification, PushDevice
 from operations.serializers import (
 	DistanceEstimateRequestSerializer,
 	DistanceEstimateResponseSerializer,
 	DriverBalanceTransactionSerializer,
 	NotificationSerializer,
+	PushDeviceRegisterSerializer,
+	PushDeviceSerializer,
+	PushDeviceUnregisterSerializer,
+	PushSendSerializer,
 )
 from pharmacies_backend.permissions import IsAdmin
 
@@ -38,6 +44,59 @@ class NotificationListView(generics.ListAPIView):
 class NotificationCreateView(generics.CreateAPIView):
 	serializer_class = NotificationSerializer
 	permission_classes = [IsAdmin]
+
+
+class PushDeviceRegisterView(APIView):
+	def post(self, request):
+		serializer = PushDeviceRegisterSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+
+		payload = serializer.validated_data
+		device, _ = PushDevice.objects.update_or_create(
+			token=payload['token'],
+			defaults={
+				'user': request.user,
+				'platform': payload['platform'],
+				'is_active': True,
+			},
+		)
+
+		return Response(PushDeviceSerializer(device).data, status=status.HTTP_201_CREATED)
+
+
+class PushDeviceUnregisterView(APIView):
+	def post(self, request):
+		serializer = PushDeviceUnregisterSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		token = serializer.validated_data['token']
+
+		updated = PushDevice.objects.filter(user=request.user, token=token).update(is_active=False)
+		return Response({'unregistered': bool(updated)})
+
+
+class PushSendView(APIView):
+	permission_classes = [IsAdmin]
+
+	def post(self, request):
+		serializer = PushSendSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		payload = serializer.validated_data
+
+		queryset = User.objects.filter(is_active=True)
+		if payload.get('roles'):
+			queryset = queryset.filter(role__in=payload['roles'])
+		if payload.get('user_ids'):
+			queryset = queryset.filter(id__in=payload['user_ids'])
+
+		user_ids = [str(user_id) for user_id in queryset.values_list('id', flat=True)]
+		send_push_to_user_ids(
+			user_ids=user_ids,
+			title=payload['title'],
+			body=payload['body'],
+			data=payload.get('data', {}),
+		)
+
+		return Response({'sent_to': len(user_ids)})
 
 
 class DistanceEstimateView(APIView):

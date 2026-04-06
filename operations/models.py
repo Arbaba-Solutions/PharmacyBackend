@@ -73,3 +73,21 @@ class Notification(TimeStampedModel):
 	class Meta:
 		db_table = 'notifications'
 		indexes = [models.Index(fields=['user', 'delivery_state'])]
+
+
+class PushDevice(TimeStampedModel):
+	class Platform(models.TextChoices):
+		ANDROID = 'android', 'Android'
+		IOS = 'ios', 'iOS'
+		WEB = 'web', 'Web'
+
+	id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+	user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_devices')
+	token = models.TextField(unique=True)
+	platform = models.CharField(max_length=20, choices=Platform.choices)
+	is_active = models.BooleanField(default=True)
+	last_seen_at = models.DateTimeField(auto_now=True)
+
+	class Meta:
+		db_table = 'push_devices'
+		indexes = [models.Index(fields=['user', 'platform', 'is_active'])]

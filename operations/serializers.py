@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from operations.models import DriverBalanceTransaction, Notification
+from operations.models import DriverBalanceTransaction, Notification, PushDevice
 
 
 class DriverBalanceTransactionSerializer(serializers.ModelSerializer):
@@ -13,6 +13,34 @@ class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
         fields = '__all__'
+
+
+class PushDeviceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PushDevice
+        fields = '__all__'
+        read_only_fields = ['user', 'is_active', 'last_seen_at', 'created_at', 'updated_at']
+
+
+class PushDeviceRegisterSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=4096)
+    platform = serializers.ChoiceField(choices=[choice for choice, _ in PushDevice.Platform.choices])
+
+
+class PushDeviceUnregisterSerializer(serializers.Serializer):
+    token = serializers.CharField(max_length=4096)
+
+
+class PushSendSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    body = serializers.CharField(max_length=5000)
+    user_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=True)
+    roles = serializers.ListField(
+        child=serializers.ChoiceField(choices=['admin', 'pharmacy', 'driver', 'customer']),
+        required=False,
+        allow_empty=True,
+    )
+    data = serializers.DictField(required=False, default=dict)
 
 
 class DistanceEstimateRequestSerializer(serializers.Serializer):

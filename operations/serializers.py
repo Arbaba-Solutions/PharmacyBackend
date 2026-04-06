@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from accounts.models import DriverProfile
@@ -11,7 +13,7 @@ class DriverBalanceTransactionSerializer(serializers.ModelSerializer):
 
 
 class DriverTopUpSerializer(serializers.Serializer):
-    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0.01)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
     note = serializers.CharField(required=False, allow_blank=True, max_length=500)
 
 

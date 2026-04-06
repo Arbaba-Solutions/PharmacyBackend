@@ -11,10 +11,18 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, required=False)
+    pharmacy_latitude = serializers.SerializerMethodField()
+    pharmacy_longitude = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = '__all__'
+
+    def get_pharmacy_latitude(self, obj):
+        return obj.pharmacy.latitude if obj.pharmacy else None
+
+    def get_pharmacy_longitude(self, obj):
+        return obj.pharmacy.longitude if obj.pharmacy else None
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])

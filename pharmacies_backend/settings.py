@@ -148,3 +148,6 @@ SUPABASE_JWKS_URL = env(
     default=f"{SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else '',
 )
 SUPABASE_JWT_AUDIENCE = env('SUPABASE_JWT_AUDIENCE', default='authenticated')
+
+GOOGLE_MAPS_API_KEY = env('GOOGLE_MAPS_API_KEY', default='')
+GOOGLE_DISTANCE_MATRIX_API_KEY = env('GOOGLE_DISTANCE_MATRIX_API_KEY', default='')

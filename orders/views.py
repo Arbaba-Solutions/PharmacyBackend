@@ -6,12 +6,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import DriverProfile, User
+from catalog.models import DeliveryZone
 from operations.fcm import send_push_to_user_ids
 from orders.models import BlacklistLog, Dispute, Order, Prescription
+from orders.pricing import calculate_order_pricing
 from orders.serializers import (
 	BlacklistLogSerializer,
 	DisputeSerializer,
 	OrderSerializer,
+	PricingPreviewRequestSerializer,
+	PricingPreviewResponseSerializer,
 	PrescriptionSerializer,
 )
 from pharmacies_backend.permissions import IsAdmin, IsAdminOrPharmacy, IsDriver
@@ -78,6 +82,24 @@ class OrderListCreateView(generics.ListCreateAPIView):
 class OrderDetailView(generics.RetrieveUpdateAPIView):
 	queryset = Order.objects.all()
 	serializer_class = OrderSerializer
+
+
+class OrderPricingPreviewView(APIView):
+	def post(self, request):
+		serializer = PricingPreviewRequestSerializer(data=request.data)
+		serializer.is_valid(raise_exception=True)
+		payload = serializer.validated_data
+
+		zone = DeliveryZone.objects.get(pk=payload['delivery_zone_id'])
+		pricing = calculate_order_pricing(zone=zone, is_customer_urgent=payload['is_customer_urgent'])
+
+		response_payload = {
+			'delivery_zone_id': zone.id,
+			**pricing,
+		}
+		response_serializer = PricingPreviewResponseSerializer(data=response_payload)
+		response_serializer.is_valid(raise_exception=True)
+		return Response(response_serializer.validated_data)
 
 
 class PrescriptionQueueView(generics.ListAPIView):

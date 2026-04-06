@@ -8,6 +8,7 @@ from orders.views import (
     DriverMarkPurchasedView,
     OrderDetailView,
     OrderListCreateView,
+    OrderPricingPreviewView,
     PrescriptionApproveView,
     PrescriptionQueueView,
     PrescriptionRejectView,
@@ -15,6 +16,7 @@ from orders.views import (
 
 urlpatterns = [
     path('', OrderListCreateView.as_view(), name='order-list-create'),
+    path('pricing-preview/', OrderPricingPreviewView.as_view(), name='order-pricing-preview'),
     path('<uuid:pk>/', OrderDetailView.as_view(), name='order-detail'),
     path('prescriptions/queue/', PrescriptionQueueView.as_view(), name='prescription-queue'),
     path('prescriptions/<uuid:pk>/approve/', PrescriptionApproveView.as_view(), name='prescription-approve'),

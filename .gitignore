@@ -7,3 +7,7 @@ wheels/
 *.egg-info
 
 db.sqlite3
+
+# extension specific files
+PharmacyBackend-output.md
+PharmacyBackend-output.txt
